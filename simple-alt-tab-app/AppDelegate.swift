@@ -6,6 +6,7 @@ import ServiceManagement
 final class Preferences {
     static let shared = Preferences()
     private let keySize = "UISize"
+    private let keyPreviewOnHover = "PreviewOnHover"
 
     var uiSize: UISize {
         get {
@@ -16,6 +17,15 @@ final class Preferences {
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: keySize)
+        }
+    }
+
+    var previewOnHover: Bool {
+        get {
+            UserDefaults.standard.object(forKey: keyPreviewOnHover) as? Bool ?? false
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: keyPreviewOnHover)
         }
     }
 }
@@ -254,6 +264,8 @@ final class SwitcherManager {
     private var mruWindowKeys: [WindowKey] = []
     private var observedPIDs: Set<pid_t> = []
     private var axObservers: [pid_t: AXObserver] = [:]
+    private var iconCache: [String: NSImage] = [:]
+    private var pendingPreviewWorkItem: DispatchWorkItem?
     private let mruLock = NSLock()
 
     private init() {
@@ -299,7 +311,7 @@ final class SwitcherManager {
             guard let self, self.isSwitching, self.cachedWins.indices.contains(index) else { return }
             self.currentIndex = index
             self.uiWindow.switcherView.currentIndex = index
-            self.previewWindow(at: index)
+            self.schedulePreviewWindow(at: index)
         }
 
         uiWindow.switcherView.onItemClicked = { [weak self] index in
@@ -310,9 +322,16 @@ final class SwitcherManager {
     }
 
     private func refreshAXObservers() {
-        NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular }
-            .forEach { observeApp($0) }
+        let runningApps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+        let runningPIDs = Set(runningApps.map(\.processIdentifier))
+
+        for pid in observedPIDs.subtracting(runningPIDs) {
+            observedPIDs.remove(pid)
+            axObservers.removeValue(forKey: pid)
+            iconCache = iconCache.filter { !$0.key.hasPrefix("\(pid):") }
+        }
+
+        runningApps.forEach { observeApp($0) }
     }
 
     private func observeApp(_ app: NSRunningApplication) {
@@ -387,6 +406,18 @@ final class SwitcherManager {
         return order
     }
 
+    private func cachedIcon(for app: NSRunningApplication, size: CGFloat) -> NSImage {
+        let cacheKey = "\(app.processIdentifier):\(Int(size))"
+        if let cached = iconCache[cacheKey] {
+            return cached
+        }
+
+        let icon = (app.icon?.copy() as? NSImage) ?? NSImage()
+        icon.size = NSSize(width: size, height: size)
+        iconCache[cacheKey] = icon
+        return icon
+    }
+
     private func getWindows(isAppOnly: Bool) -> [WindowItem] {
         var items: [WindowItem] = []
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -404,8 +435,7 @@ final class SwitcherManager {
             }
 
             let appName = app.localizedName ?? "Unknown"
-            let icon = (app.icon?.copy() as? NSImage) ?? NSImage()
-            icon.size = NSSize(width: iconSize, height: iconSize)
+            let icon = cachedIcon(for: app, size: iconSize)
 
             for window in windows {
                 var subroleRaw: CFTypeRef?
@@ -473,9 +503,16 @@ final class SwitcherManager {
         executeSwitch()
     }
 
-    private func previewWindow(at index: Int) {
-        guard cachedWins.indices.contains(index) else { return }
-        AXUIElementPerformAction(cachedWins[index].axWindow, kAXRaiseAction as CFString)
+    private func schedulePreviewWindow(at index: Int) {
+        pendingPreviewWorkItem?.cancel()
+        guard Preferences.shared.previewOnHover else { return }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.isSwitching, self.cachedWins.indices.contains(index), self.currentIndex == index else { return }
+            AXUIElementPerformAction(self.cachedWins[index].axWindow, kAXRaiseAction as CFString)
+        }
+        pendingPreviewWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
     }
 
     private func executeSwitch() {
@@ -507,6 +544,8 @@ final class SwitcherManager {
 
     private func cancelSwitch() {
         isSwitching = false
+        pendingPreviewWorkItem?.cancel()
+        pendingPreviewWorkItem = nil
         uiWindow.hide()
         cachedWins.removeAll(keepingCapacity: true)
     }
@@ -595,6 +634,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         let currentSize = Preferences.shared.uiSize
 
+        menu.addItem(NSMenuItem(title: "About Simple Option Tab", action: #selector(actionShowAbout), keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
+
+        let hoverItem = NSMenuItem(title: "Preview Window on Hover", action: #selector(togglePreviewOnHover(_:)), keyEquivalent: "")
+        hoverItem.state = Preferences.shared.previewOnHover ? .on : .off
+        menu.addItem(hoverItem)
+
         let sizeItem = NSMenuItem(title: "Size", action: nil, keyEquivalent: "")
         let sizeMenu = NSMenu()
         for size in UISize.allCases {
@@ -608,9 +654,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Check Accessibility Permissions", action: #selector(actionCheckAccessibility), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "About Simple Option Tab", action: #selector(actionShowAbout), keyEquivalent: ""))
-
-        menu.addItem(NSMenuItem.separator())
         let loginItem = NSMenuItem(title: "Start at Login", action: #selector(toggleLoginItem(_:)), keyEquivalent: "")
         if #available(macOS 13.0, *) {
             loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -632,6 +675,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 item.state = item.representedObject as? UISize == newSize ? .on : .off
             }
         }
+    }
+
+    @objc private func togglePreviewOnHover(_ sender: NSMenuItem) {
+        Preferences.shared.previewOnHover.toggle()
+        sender.state = Preferences.shared.previewOnHover ? .on : .off
     }
 
     @objc private func actionCheckAccessibility() {
