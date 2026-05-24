@@ -38,38 +38,54 @@ func drawIcon(size: CGFloat) -> NSBitmapImageRep {
     let bounds = CGRect(x: 0, y: 0, width: size, height: size)
     let scale = size / 1024.0
 
-    NSColor(calibratedRed: 0.08, green: 0.10, blue: 0.13, alpha: 1).setFill()
-    roundedRect(bounds.insetBy(dx: 60 * scale, dy: 60 * scale), radius: 210 * scale).fill()
+    NSColor.white.setFill()
+    roundedRect(bounds.insetBy(dx: 72 * scale, dy: 72 * scale), radius: 190 * scale).fill()
 
-    let background = NSGradient(colors: [
-        NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.30, alpha: 1),
-        NSColor(calibratedRed: 0.07, green: 0.09, blue: 0.13, alpha: 1)
-    ])
-    background?.draw(in: roundedRect(bounds.insetBy(dx: 76 * scale, dy: 76 * scale), radius: 188 * scale), angle: -45)
+    NSColor.black.setStroke()
+    let outer = roundedRect(bounds.insetBy(dx: 86 * scale, dy: 86 * scale), radius: 176 * scale)
+    outer.lineWidth = 28 * scale
+    outer.stroke()
 
-    let backRect = CGRect(x: 245 * scale, y: 455 * scale, width: 430 * scale, height: 285 * scale)
-    NSColor(calibratedRed: 0.27, green: 0.31, blue: 0.37, alpha: 1).setFill()
-    roundedRect(backRect, radius: 46 * scale).fill()
+    func drawWindow(_ rect: CGRect, active: Bool) {
+        let path = roundedRect(rect, radius: 46 * scale)
+        path.lineWidth = 28 * scale
 
-    let frontRect = CGRect(x: 350 * scale, y: 285 * scale, width: 430 * scale, height: 285 * scale)
-    NSColor(calibratedRed: 0.90, green: 0.92, blue: 0.95, alpha: 1).setFill()
-    roundedRect(frontRect, radius: 46 * scale).fill()
+        if active {
+            NSColor.black.setFill()
+            path.fill()
+            NSColor.white.setStroke()
+            path.stroke()
 
-    NSColor(calibratedRed: 1.0, green: 0.78, blue: 0.18, alpha: 1).setFill()
-    let arrow = NSBezierPath()
-    arrow.move(to: CGPoint(x: 250 * scale, y: 310 * scale))
-    arrow.line(to: CGPoint(x: 250 * scale, y: 215 * scale))
-    arrow.line(to: CGPoint(x: 125 * scale, y: 350 * scale))
-    arrow.line(to: CGPoint(x: 250 * scale, y: 485 * scale))
-    arrow.line(to: CGPoint(x: 250 * scale, y: 390 * scale))
-    arrow.line(to: CGPoint(x: 490 * scale, y: 390 * scale))
-    arrow.line(to: CGPoint(x: 490 * scale, y: 310 * scale))
-    arrow.close()
-    arrow.fill()
+            NSColor.white.setFill()
+            roundedRect(CGRect(
+                x: rect.minX + 70 * scale,
+                y: rect.maxY - 92 * scale,
+                width: 36 * scale,
+                height: 36 * scale
+            ), radius: 18 * scale).fill()
+            roundedRect(CGRect(
+                x: rect.minX + 124 * scale,
+                y: rect.maxY - 92 * scale,
+                width: 36 * scale,
+                height: 36 * scale
+            ), radius: 18 * scale).fill()
+            roundedRect(CGRect(
+                x: rect.minX + 178 * scale,
+                y: rect.maxY - 92 * scale,
+                width: 36 * scale,
+                height: 36 * scale
+            ), radius: 18 * scale).fill()
+        } else {
+            NSColor.white.setFill()
+            path.fill()
+            NSColor.black.setStroke()
+            path.stroke()
+        }
+    }
 
-    NSColor(calibratedRed: 0.10, green: 0.13, blue: 0.18, alpha: 1).setFill()
-    roundedRect(CGRect(x: 420 * scale, y: 470 * scale, width: 130 * scale, height: 34 * scale), radius: 17 * scale).fill()
-    roundedRect(CGRect(x: 420 * scale, y: 395 * scale, width: 240 * scale, height: 34 * scale), radius: 17 * scale).fill()
+    drawWindow(CGRect(x: 210 * scale, y: 495 * scale, width: 420 * scale, height: 270 * scale), active: false)
+    drawWindow(CGRect(x: 285 * scale, y: 390 * scale, width: 420 * scale, height: 270 * scale), active: false)
+    drawWindow(CGRect(x: 360 * scale, y: 275 * scale, width: 420 * scale, height: 270 * scale), active: true)
 
     NSGraphicsContext.restoreGraphicsState()
     return bitmap

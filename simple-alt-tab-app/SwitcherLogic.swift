@@ -2,46 +2,27 @@ import Cocoa
 import ApplicationServices
 import Carbon.HIToolbox
 
-final class Preferences {
-    static let shared = Preferences()
-    private let keySize = "UISize"
-    private let keyPreviewWindow = "PreviewWindow"
-    private let legacyKeyPreviewOnHover = "PreviewOnHover"
+@_silgen_name("_AXUIElementGetWindow")
+@discardableResult
+private func _AXUIElementGetWindow(_ element: AXUIElement, _ outWindowID: UnsafeMutablePointer<CGWindowID>) -> AXError
 
-    var uiSize: UISize {
-        get {
-            if let raw = UserDefaults.standard.string(forKey: keySize), let size = UISize(rawValue: raw) {
-                return size
-            }
-            return .medium
-        }
-        set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: keySize)
-        }
-    }
-
-    var previewWindow: Bool {
-        get {
-            if let value = UserDefaults.standard.object(forKey: keyPreviewWindow) as? Bool {
-                return value
-            }
-            return UserDefaults.standard.object(forKey: legacyKeyPreviewOnHover) as? Bool ?? false
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: keyPreviewWindow)
-        }
-    }
+private func getWindowID(for axWindow: AXUIElement) -> CGWindowID? {
+    var id: CGWindowID = 0
+    let result = _AXUIElementGetWindow(axWindow, &id)
+    return result == .success ? id : nil
 }
 
-enum UISize: String, CaseIterable {
-    case small = "Small"
-    case medium = "Medium"
-    case large = "Large"
-
-    var rowHeight: CGFloat { self == .small ? 36 : (self == .large ? 56 : 46) }
-    var iconSize: CGFloat { self == .small ? 24 : (self == .large ? 40 : 32) }
-    var fontSize: CGFloat { self == .small ? 13 : (self == .large ? 17 : 15) }
-    var titleSize: CGFloat { self == .small ? 12 : (self == .large ? 15 : 14) }
+private func getActiveSpaceWindowIDs() -> Set<CGWindowID> {
+    guard let windowInfos = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+        return []
+    }
+    var ids = Set<CGWindowID>()
+    for info in windowInfos {
+        if let windowID = info[kCGWindowNumber as String] as? CGWindowID {
+            ids.insert(windowID)
+        }
+    }
+    return ids
 }
 
 struct Theme {
@@ -95,7 +76,8 @@ struct WindowKey: Hashable {
 }
 
 struct WindowItem {
-    let axWindow: AXUIElement
+    let axWindow: AXUIElement?
+    let windowID: CGWindowID?
     let app: NSRunningApplication
     let appName: String
     let title: String
@@ -172,6 +154,33 @@ final class SwitcherView: NSView {
             NSBezierPath(roundedRect: bounds, xRadius: Theme.radiusBG, yRadius: Theme.radiusBG).fill()
         }
 
+        if items.isEmpty {
+            let text = "No open windows"
+            let size = Preferences.shared.uiSize
+            let font = NSFont.systemFont(ofSize: size.fontSize, weight: .medium)
+            let color = NSColor(white: 0.7, alpha: 1.0)
+            
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = .center
+            
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: color,
+                .paragraphStyle: paragraphStyle
+            ]
+            
+            let string = NSAttributedString(string: text, attributes: attrs)
+            let textHeight: CGFloat = size.fontSize + 10
+            let textRect = NSRect(
+                x: Theme.padding,
+                y: bounds.midY - (textHeight / 2),
+                width: bounds.width - (Theme.padding * 2),
+                height: textHeight
+            )
+            string.draw(in: textRect)
+            return
+        }
+
         let prefs = Preferences.shared.uiSize
         let iconSize = prefs.iconSize
         let textHeight: CGFloat = prefs.fontSize + 10
@@ -232,7 +241,12 @@ final class SwitcherWindow: NSPanel {
 
     func show(with items: [WindowItem], index: Int) {
         let rowHeight = Preferences.shared.uiSize.rowHeight
-        let height = CGFloat(items.count) * rowHeight + (Theme.padding * 2)
+        let height: CGFloat
+        if items.isEmpty {
+            height = 60
+        } else {
+            height = CGFloat(items.count) * rowHeight + (Theme.padding * 2)
+        }
         guard let screen = NSScreen.main else { return }
 
         let frame = NSRect(
@@ -428,6 +442,11 @@ final class SwitcherManager {
         let iconSize = Preferences.shared.uiSize.iconSize
         let fallbackOrder = fallbackWindowOrder()
 
+        let activeSpaceIDs = getActiveSpaceWindowIDs()
+        let scope = Preferences.shared.windowScope
+        
+        var localWindowIDs = Set<CGWindowID>()
+
         for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
             if isAppOnly && app.processIdentifier != frontPID { continue }
 
@@ -448,6 +467,18 @@ final class SwitcherManager {
                     continue
                 }
 
+                guard let windowID = getWindowID(for: window) else {
+                    continue
+                }
+
+                if scope == .currentDesktop {
+                    if !activeSpaceIDs.contains(windowID) {
+                        continue
+                    }
+                }
+
+                localWindowIDs.insert(windowID)
+
                 var titleRaw: CFTypeRef?
                 AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRaw)
                 let title = (titleRaw as? String) ?? ""
@@ -456,6 +487,68 @@ final class SwitcherManager {
                 let pidFallbackKey = WindowKey(pid: app.processIdentifier, axHash: 0)
                 items.append(WindowItem(
                     axWindow: window,
+                    windowID: windowID,
+                    app: app,
+                    appName: appName,
+                    title: title,
+                    icon: icon,
+                    key: key,
+                    fallbackOrder: fallbackOrder[pidFallbackKey] ?? Int.max
+                ))
+            }
+        }
+
+        if scope == .allDesktops {
+            guard let windowInfos = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+                return items
+            }
+
+            for info in windowInfos {
+                guard let windowID = info[kCGWindowNumber as String] as? CGWindowID,
+                      let pid = info[kCGWindowOwnerPID as String] as? pid_t,
+                      let layer = info[kCGWindowLayer as String] as? Int,
+                      layer == 0,
+                      !localWindowIDs.contains(windowID) else {
+                    continue
+                }
+
+                var title = (info[kCGWindowName as String] as? String) ?? ""
+                
+                var hasScreenRecordingPermission = true
+                if #available(macOS 10.15, *) {
+                    hasScreenRecordingPermission = CGPreflightScreenCaptureAccess()
+                }
+                
+                if hasScreenRecordingPermission {
+                    guard !title.isEmpty else { continue }
+                } else {
+                    if title.isEmpty {
+                        title = "Window"
+                    }
+                }
+
+                guard let bounds = info[kCGWindowBounds as String] as? [String: Any],
+                      let width = bounds["Width"] as? CGFloat,
+                      let height = bounds["Height"] as? CGFloat,
+                      width > 100 && height > 100 else {
+                    continue
+                }
+
+                guard let app = NSRunningApplication(processIdentifier: pid),
+                      app.activationPolicy == .regular else {
+                    continue
+                }
+
+                if isAppOnly && pid != frontPID { continue }
+
+                let appName = app.localizedName ?? "Unknown"
+                let icon = cachedIcon(for: app, size: iconSize)
+
+                let key = WindowKey(pid: pid, axHash: 0)
+                let pidFallbackKey = WindowKey(pid: pid, axHash: 0)
+                items.append(WindowItem(
+                    axWindow: nil,
+                    windowID: windowID,
                     app: app,
                     appName: appName,
                     title: title,
@@ -488,15 +581,22 @@ final class SwitcherManager {
             isSwitching = true
             refreshAXObservers()
             cachedWins = getWindows(isAppOnly: isAppOnly)
-            if cachedWins.count <= 1 {
-                cancelSwitch()
-                return
+            
+            if cachedWins.isEmpty {
+                currentIndex = 0
+            } else if cachedWins.count == 1 {
+                currentIndex = 0
+            } else {
+                currentIndex = isReverse ? cachedWins.count - 1 : 1
             }
-            currentIndex = isReverse ? cachedWins.count - 1 : 1
-        } else if isReverse {
-            currentIndex = currentIndex > 0 ? currentIndex - 1 : cachedWins.count - 1
         } else {
-            currentIndex = currentIndex < cachedWins.count - 1 ? currentIndex + 1 : 0
+            if cachedWins.isEmpty || cachedWins.count == 1 {
+                currentIndex = 0
+            } else if isReverse {
+                currentIndex = currentIndex > 0 ? currentIndex - 1 : cachedWins.count - 1
+            } else {
+                currentIndex = currentIndex < cachedWins.count - 1 ? currentIndex + 1 : 0
+            }
         }
 
         uiWindow.show(with: cachedWins, index: currentIndex)
@@ -521,6 +621,7 @@ final class SwitcherManager {
     }
 
     private func previewWindow(_ item: WindowItem) {
+        guard let axWindow = item.axWindow else { return }
         if #available(macOS 14.0, *) {
             NSApp.yieldActivation(to: item.app)
             item.app.activate()
@@ -528,9 +629,9 @@ final class SwitcherManager {
             item.app.activate(options: .activateIgnoringOtherApps)
         }
 
-        AXUIElementSetAttributeValue(item.axWindow, kAXMainAttribute as CFString, true as CFTypeRef)
-        AXUIElementSetAttributeValue(item.axWindow, kAXFocusedAttribute as CFString, true as CFTypeRef)
-        AXUIElementPerformAction(item.axWindow, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(axWindow, kAXMainAttribute as CFString, true as CFTypeRef)
+        AXUIElementSetAttributeValue(axWindow, kAXFocusedAttribute as CFString, true as CFTypeRef)
+        AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
     }
 
     private func executeSwitch() {
@@ -548,15 +649,32 @@ final class SwitcherManager {
             target.app.activate(options: .activateIgnoringOtherApps)
         }
 
-        var isMinimized: CFTypeRef?
-        AXUIElementCopyAttributeValue(target.axWindow, kAXMinimizedAttribute as CFString, &isMinimized)
-        if let minimized = isMinimized as? Bool, minimized {
-            AXUIElementSetAttributeValue(target.axWindow, kAXMinimizedAttribute as CFString, false as CFTypeRef)
-        } else {
-            AXUIElementPerformAction(target.axWindow, kAXRaiseAction as CFString)
+        var axWindowToFocus: AXUIElement? = target.axWindow
+        if axWindowToFocus == nil, let windowID = target.windowID {
+            let axApp = AXUIElementCreateApplication(target.app.processIdentifier)
+            var windowsRaw: CFTypeRef?
+            if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRaw) == .success,
+               let windows = windowsRaw as? [AXUIElement] {
+                for win in windows {
+                    if getWindowID(for: win) == windowID {
+                        axWindowToFocus = win
+                        break
+                    }
+                }
+            }
         }
 
-        recordWindow(target.axWindow, pid: target.app.processIdentifier)
+        if let axWindowToFocus {
+            var isMinimized: CFTypeRef?
+            AXUIElementCopyAttributeValue(axWindowToFocus, kAXMinimizedAttribute as CFString, &isMinimized)
+            if let minimized = isMinimized as? Bool, minimized {
+                AXUIElementSetAttributeValue(axWindowToFocus, kAXMinimizedAttribute as CFString, false as CFTypeRef)
+            } else {
+                AXUIElementPerformAction(axWindowToFocus, kAXRaiseAction as CFString)
+            }
+            recordWindow(axWindowToFocus, pid: target.app.processIdentifier)
+        }
+
         cancelSwitch()
     }
 
@@ -606,7 +724,10 @@ final class EventMonitor {
                 if type == .keyDown && isOption {
                     if keyCode == 48 {
                         DispatchQueue.main.async {
-                            SwitcherManager.shared.handleSwitch(isAppOnly: false, isReverse: isShift)
+                            SwitcherManager.shared.handleSwitch(
+                                isAppOnly: false,
+                                isReverse: isShift
+                            )
                         }
                         return nil
                     } else if keyCode == 50 {
