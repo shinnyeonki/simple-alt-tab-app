@@ -12,10 +12,7 @@ private func getWindowID(for axWindow: AXUIElement) -> CGWindowID? {
     return result == .success ? id : nil
 }
 
-private func getActiveSpaceWindowIDs() -> Set<CGWindowID> {
-    guard let windowInfos = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-        return []
-    }
+private func getActiveSpaceWindowIDs(from windowInfos: [[String: Any]]) -> Set<CGWindowID> {
     var ids = Set<CGWindowID>()
     for info in windowInfos {
         if let windowID = info[kCGWindowNumber as String] as? CGWindowID {
@@ -284,6 +281,7 @@ final class SwitcherManager {
     private var iconCache: [String: NSImage] = [:]
     private var pendingPreviewWorkItem: DispatchWorkItem?
     private let mruLock = NSLock()
+    private var lastPreviewedKey: WindowKey?
 
     private init() {
         setupObservers()
@@ -319,6 +317,9 @@ final class SwitcherManager {
             self.mruWindowKeys.removeAll(where: { $0.pid == pid })
             self.mruLock.unlock()
             self.observedPIDs.remove(pid)
+            if let observer = self.axObservers[pid] {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
+            }
             self.axObservers.removeValue(forKey: pid)
             self.iconCache = self.iconCache.filter { !$0.key.hasPrefix("\(pid):") }
         }
@@ -408,11 +409,7 @@ final class SwitcherManager {
         mruLock.unlock()
     }
 
-    private func fallbackWindowOrder() -> [WindowKey: Int] {
-        guard let windowInfos = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-            return [:]
-        }
-
+    private func fallbackWindowOrder(from windowInfos: [[String: Any]]) -> [WindowKey: Int] {
         var order: [WindowKey: Int] = [:]
         for (index, info) in windowInfos.enumerated() {
             guard let pid = info[kCGWindowOwnerPID as String] as? pid_t,
@@ -440,9 +437,11 @@ final class SwitcherManager {
         var items: [WindowItem] = []
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let iconSize = Preferences.shared.uiSize.iconSize
-        let fallbackOrder = fallbackWindowOrder()
+        
+        let onScreenInfos = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let fallbackOrder = fallbackWindowOrder(from: onScreenInfos)
 
-        let activeSpaceIDs = getActiveSpaceWindowIDs()
+        let activeSpaceIDs = getActiveSpaceWindowIDs(from: onScreenInfos)
         let scope = Preferences.shared.windowScope
         
         var localWindowIDs = Set<CGWindowID>()
@@ -614,7 +613,12 @@ final class SwitcherManager {
 
         let workItem = DispatchWorkItem { [weak self] in
             guard let self, self.isSwitching, self.cachedWins.indices.contains(index), self.currentIndex == index else { return }
-            self.previewWindow(self.cachedWins[index])
+            let target = self.cachedWins[index]
+            if self.lastPreviewedKey == target.key {
+                return
+            }
+            self.lastPreviewedKey = target.key
+            self.previewWindow(target)
         }
         pendingPreviewWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
@@ -684,6 +688,7 @@ final class SwitcherManager {
         pendingPreviewWorkItem = nil
         uiWindow.hide()
         cachedWins.removeAll(keepingCapacity: true)
+        lastPreviewedKey = nil
     }
 }
 
