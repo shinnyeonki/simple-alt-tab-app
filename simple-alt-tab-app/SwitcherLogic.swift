@@ -97,8 +97,15 @@ final class SwitcherView: NSView {
     }
 
     private var trackingArea: NSTrackingArea?
+    private var initialMouseScreenPoint: NSPoint?
+    private var isMouseTrackingEnabled = false
 
     override var acceptsFirstResponder: Bool { true }
+
+    func resetMouseTracking() {
+        initialMouseScreenPoint = NSEvent.mouseLocation
+        isMouseTrackingEnabled = false
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -113,10 +120,28 @@ final class SwitcherView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        selectItem(at: event.locationInWindow)
+        handleMouseEvent(event)
     }
 
     override func mouseMoved(with event: NSEvent) {
+        handleMouseEvent(event)
+    }
+
+    private func handleMouseEvent(_ event: NSEvent) {
+        if !isMouseTrackingEnabled {
+            guard let initialPoint = initialMouseScreenPoint else {
+                isMouseTrackingEnabled = true
+                selectItem(at: event.locationInWindow)
+                return
+            }
+            let currentPoint = NSEvent.mouseLocation
+            let distance = hypot(currentPoint.x - initialPoint.x, currentPoint.y - initialPoint.y)
+            if distance > 2.0 {
+                isMouseTrackingEnabled = true
+            } else {
+                return
+            }
+        }
         selectItem(at: event.locationInWindow)
     }
 
@@ -256,6 +281,7 @@ final class SwitcherWindow: NSPanel {
         setFrame(frame, display: false)
         switcherView.items = items
         switcherView.currentIndex = index
+        switcherView.resetMouseTracking()
         makeKeyAndOrderFront(nil)
         switcherView.window?.acceptsMouseMovedEvents = true
         switcherView.needsDisplay = true
