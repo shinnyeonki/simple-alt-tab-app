@@ -628,6 +628,21 @@ final class SwitcherManager {
         schedulePreviewWindow(at: currentIndex)
     }
 
+    func handleSelectionMove(isReverse: Bool) {
+        guard isSwitching else { return }
+
+        if cachedWins.isEmpty || cachedWins.count == 1 {
+            currentIndex = 0
+        } else if isReverse {
+            currentIndex = currentIndex > 0 ? currentIndex - 1 : cachedWins.count - 1
+        } else {
+            currentIndex = currentIndex < cachedWins.count - 1 ? currentIndex + 1 : 0
+        }
+
+        uiWindow.switcherView.currentIndex = currentIndex
+        schedulePreviewWindow(at: currentIndex)
+    }
+
     func handleModifiersChanged(flags: CGEventFlags) {
         guard isSwitching, !flags.contains(.maskAlternate) else { return }
         executeSwitch()
@@ -764,6 +779,11 @@ final class EventMonitor {
                     } else if keyCode == 50 {
                         DispatchQueue.main.async {
                             SwitcherManager.shared.handleSwitch(isAppOnly: true, isReverse: isShift)
+                        }
+                        return nil
+                    } else if keyCode == 125 || keyCode == 126 {
+                        DispatchQueue.main.async {
+                            SwitcherManager.shared.handleSelectionMove(isReverse: keyCode == 126)
                         }
                         return nil
                     }
