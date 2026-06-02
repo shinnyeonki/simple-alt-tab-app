@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = SwitcherManager.shared
 
         checkPermissionsAndStart()
-        print("Simple Option Tab started")
+        print("Simple Alt Tab started")
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
@@ -37,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusMenuItem)
         menu.addItem(NSMenuItem.separator())
 
-        menu.addItem(NSMenuItem(title: "About Simple Option Tab", action: #selector(actionShowAbout), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "About Simple Alt Tab", action: #selector(actionShowAbout), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
 
         let previewItem = NSMenuItem(title: "Live Window Preview", action: #selector(togglePreviewWindow(_:)), keyEquivalent: "")
@@ -145,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = isTrusted ? "Accessibility Granted" : "Accessibility Required"
         alert.informativeText = isTrusted
-            ? "Simple Option Tab has the required permissions to switch windows."
+            ? "Simple Alt Tab has the required permissions to switch windows."
             : "Please allow the app in System Settings > Privacy & Security > Accessibility."
         alert.runModal()
     }
@@ -153,7 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func actionShowAbout() {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "Simple Option Tab"
+        alert.messageText = "Simple Alt Tab"
         alert.informativeText = "A lightweight macOS window switcher."
         alert.icon = NSImage(systemSymbolName: "macwindow.on.rectangle", accessibilityDescription: nil)
         alert.addButton(withTitle: "OK")

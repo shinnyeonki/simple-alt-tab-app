@@ -1,6 +1,6 @@
-# Simple Option Tab App - 기술 및 아키텍처 보고서 (Technical & Architecture Report)
+# Simple Alt Tab App - 기술 및 아키텍처 보고서 (Technical & Architecture Report)
 
-본 보고서는 `simple-alt-tab-app` (이하 Simple Option Tab)의 전반적인 설계 사상, 적용된 핵심 기술 표준, 데이터 정합성 보장 메커니즘, 객체 지향 및 운영체제 연동 디자인 패턴, 그리고 성능 최적화 아키텍처를 심층 분석하여 서술합니다. 
+본 보고서는 `simple-alt-tab-app` (이하 Simple Alt Tab)의 전반적인 설계 사상, 적용된 핵심 기술 표준, 데이터 정합성 보장 메커니즘, 객체 지향 및 운영체제 연동 디자인 패턴, 그리고 성능 최적화 아키텍처를 심층 분석하여 서술합니다. 
 
 ---
 
@@ -26,7 +26,7 @@ macOS 어플리케이션은 크게 세 가지 활성화 정책(Activation Policy
 * `.accessory`: Dock 아이콘이 나타나지 않고 UI 창을 띄울 수 있으나 다른 앱의 활성화를 방해하지 않는 형태.
 * `.prohibited`: UI가 전혀 없고 백그라운드 데몬으로만 동작하는 형태.
 
-Simple Option Tab은 사용자가 단축키를 눌렀을 때만 일시적으로 화면 중앙에 창 목록을 오버레이로 보여주는 유틸리티입니다. 따라서 Dock 아이콘을 가려 시스템 UI 공간을 차지하지 않고, 현재 구동 중인 타겟 어플리케이션의 Focus 상태를 해치지 않도록 **`.accessory` 정책**을 명시적으로 도입했습니다.
+Simple Alt Tab은 사용자가 단축키를 눌렀을 때만 일시적으로 화면 중앙에 창 목록을 오버레이로 보여주는 유틸리티입니다. 따라서 Dock 아이콘을 가려 시스템 UI 공간을 차지하지 않고, 현재 구동 중인 타겟 어플리케이션의 Focus 상태를 해치지 않도록 **`.accessory` 정책**을 명시적으로 도입했습니다.
 ```swift
 NSApp.setActivationPolicy(.accessory)
 ```
@@ -64,7 +64,7 @@ macOS에서 윈도우 정보를 획득하는 방법은 크게 두 가지이나, 
    * **장점**: 현재 화면뿐만 아니라 macOS 전체 가상 데스크톱에 존재하는 모든 창의 Layer, Size, Title, ID 등의 메타데이터를 완벽하게 반환합니다.
    * **단점**: 반환값은 읽기 전용 딕셔너리(`[String: Any]`) 배열에 불과하므로, 특정 창을 실제로 조작하거나 포커싱하는 행위가 불가능합니다.
 
-Simple Option Tab은 이 두 API의 장점을 유기적으로 결합한 **하이브리드 파이프라인**으로 작동합니다.
+Simple Alt Tab은 이 두 API의 장점을 유기적으로 결합한 **하이브리드 파이프라인**으로 작동합니다.
 * 먼저 `runningApplications`에서 regular 정책을 가진 앱들을 순회하며 `AXUIElementCopyAttributeValue`로 현재 활성화된 화면의 윈도우를 수집합니다 (`localWindowIDs`에 ID 등록).
 * 만약 전체 데스크톱 범위(`scope == .allDesktops`) 모드라면, `CGWindowListCopyWindowInfo`를 호출하여 전체 창 목록을 분석한 뒤, 앞서 수집된 `localWindowIDs`에 중복 포함되지 않은 타 데스크톱의 창들을 찾아 `WindowItem` 배열에 통합합니다.
 * 이 과정을 통해 사용자는 가상 데스크톱 너머의 창까지 한눈에 볼 수 있으며, 실제 창 활성화 명령 역시 동적으로 매칭되어 정상 수행됩니다.
