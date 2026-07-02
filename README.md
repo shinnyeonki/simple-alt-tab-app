@@ -1,5 +1,5 @@
 # Simple Alt Tab App (Option-Tab Switcher)
-
+![](assets/sample.mp4)
 `simple-alt-tab-app`은 macOS 환경에서 작동하는 lightweight 단축키 기반 창 전환기입니다. 시스템 기본 단축키(Cmd+Tab)를 대체하거나 보완하여, 사용자가 `Option + Tab` 및 `Option + Shift + Tab`을 통해 활성화된 창 간에 빠르고 직관적으로 전환할 수 있도록 돕습니다.
 
 ---
