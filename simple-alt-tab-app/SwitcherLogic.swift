@@ -297,7 +297,7 @@ final class SwitcherManager {
     static let shared = SwitcherManager()
 
     private let uiWindow = SwitcherWindow()
-    private var isSwitching = false
+    fileprivate var isSwitching = false
     private var cachedWins: [WindowItem] = []
     private var currentIndex = 0
 
@@ -757,8 +757,10 @@ final class EventMonitor {
 
                 let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
                 let flags = event.flags
-                let isOption = flags.contains(.maskAlternate)
-                let isShift = flags.contains(.maskShift)
+                let hasOption = flags.contains(.maskAlternate)
+                let hasCommand = flags.contains(.maskCommand)
+                let hasControl = flags.contains(.maskControl)
+                let hasShift = flags.contains(.maskShift)
 
                 if type == .flagsChanged {
                     DispatchQueue.main.async {
@@ -767,21 +769,23 @@ final class EventMonitor {
                     return Unmanaged.passUnretained(event)
                 }
 
-                if type == .keyDown && isOption {
+                let isPureOption = hasOption && !hasCommand && !hasControl
+
+                if type == .keyDown && isPureOption {
                     if keyCode == 48 {
                         DispatchQueue.main.async {
                             SwitcherManager.shared.handleSwitch(
                                 isAppOnly: false,
-                                isReverse: isShift
+                                isReverse: hasShift
                             )
                         }
                         return nil
                     } else if keyCode == 50 {
                         DispatchQueue.main.async {
-                            SwitcherManager.shared.handleSwitch(isAppOnly: true, isReverse: isShift)
+                            SwitcherManager.shared.handleSwitch(isAppOnly: true, isReverse: hasShift)
                         }
                         return nil
-                    } else if keyCode == 125 || keyCode == 126 {
+                    } else if (keyCode == 125 || keyCode == 126) && SwitcherManager.shared.isSwitching {
                         DispatchQueue.main.async {
                             SwitcherManager.shared.handleSelectionMove(isReverse: keyCode == 126)
                         }
